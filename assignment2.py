@@ -3,89 +3,124 @@
 '''
 OPS445 Assignment 2
 Program: assignment2.py 
-Author: "Student Name"
-Semester: "Enter Winter/Summer/Fall Year"
+Author: "Arnie Lloyd Sarmiento"
+Semester: "Fall 2024"
 
-The python code in this file is original work written by
-"Student Name". No code in this file is copied from any other source 
-except those provided by the course instructor, including any person, 
-textbook, or on-line resource. I have not shared this python script 
-with anyone or anything except for submission for grading.  
-I understand that the Academic Honesty Policy will be enforced and 
-violators will be reported and appropriate action will be taken.
-
-Description: <Enter your documentation here>
+Description: This script monitors memory usage of processes running on a Linux system. It retrieves and displays the memory usage statistics, including total memory, available memory, and process-specific memory usage. The script allows users to visualize memory consumption in a graphical format, either in kilobytes or human-readable units.
 
 '''
 
+import os
 import argparse
-import os, sys
 
-def parse_command_args() -> object:
-    "Set up argparse here. Call this function inside main."
-    parser = argparse.ArgumentParser(description="Memory Visualiser -- See Memory Usage Report with bar charts",epilog="Copyright 2023")
-    parser.add_argument("-l", "--length", type=int, default=20, help="Specify the length of the graph. Default is 20.")
-    # add argument for "human-readable". USE -H, don't use -h! -h is reserved for --help which is created automatically.
-    # check the docs for an argparse option to store this as a boolean.
-    parser.add_argument("program", type=str, nargs='?', help="if a program is specified, show memory use of all associated processes. Show only total use is not.")
-    args = parser.parse_args()
-    return args
-# create argparse function
-# -H human readable
-# -r running only
+def parse_command_args():
+    parser = argparse.ArgumentParser(description="Memory Visualizer")
+    parser.add_argument('-H', '--human-readable', action='store_true', help='Display sizes in human-readable format.')
+    parser.add_argument('-l', '--length', type=int, default=20, help='Specify the graph length (default is 20).')
+    parser.add_argument('program', nargs='?', type=str, help='Program name to display memory usage for its processes.')
+    return parser.parse_args()
+    # Parses the command line arguments. If a program name is provided, the script will display memory usage for its processes.
+    # If no program is provided, the script will display system-wide memory usage.
 
-def percent_to_graph(percent: float, length: int=20) -> str:
-    "turns a percent 0.0 - 1.0 into a bar graph"
-    ...
-# percent to graph function
+def pids_of_prog(program):
+    try:
+        return os.popen(f'pidof {program}').read().strip().split()
+    except Exception:
+        return []
+    # Retrieves the list of PIDs for a given program using the 'pidof' command.
 
-def get_sys_mem() -> int:
-    "return total system memory (used or available) in kB"
-    ...
+def rss_mem_of_pid(pid):
+    """Calculates RSS memory usage of a given PID from /proc/[pid]/smaps."""
+    rss = 0
+    try:
+        with open(f'/proc/{pid}/smaps', 'r') as smaps_file:
+            for line in smaps_file:
+                if line.startswith('Rss:'):
+                    rss += int(line.split()[1])  # Add the RSS value (in KB)
+    except FileNotFoundError:
+        print(f"ERROR: PID {pid} does not exist or /proc/{pid}/smaps is inaccessible.")
+    except Exception as e:
+        print(f"Unexpected error while reading /proc/{pid}/smaps: {e}")
+    return rss
+    # Reads the memory usage of a given PID from its /proc/[pid]/smaps file and returns the RSS value in kilobytes (KB).
 
-def get_avail_mem() -> int:
-    "return total memory that is available"
-    ...
+def human_readable_format(size_kb):
+    units = ['KiB', 'MiB', 'GiB', 'TiB']
+    size = float(size_kb)
+    for unit in units:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} TiB"
+    # Converts memory size in kilobytes (KB) to a human-readable format (e.g., MiB, GiB).
 
-def pids_of_prog(app_name: str) -> list:
-    "given an app name, return all pids associated with app"
-    ...
+def percent_to_graph(percent, length):
+    filled = int(round(percent * length))
+    return '#' * filled + ' ' * (length - filled)
+    # Converts a percentage value to a text-based bar graph with the specified length.
 
-def rss_mem_of_pid(proc_id: str) -> int:
-    "given a process id, return the resident memory used, zero if not found"
-    ...
+def get_sys_mem():
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    return int(line.split()[1])
+    except Exception:
+        return 0
+    # Retrieves the total system memory (MemTotal) from /proc/meminfo.
 
-def bytes_to_human_r(kibibytes: int, decimal_places: int=2) -> str:
-    "turn 1,024 into 1 MiB, for example"
-    suffixes = ['KiB', 'MiB', 'GiB', 'TiB', 'PiB']  # iB indicates 1024
-    suf_count = 0
-    result = kibibytes 
-    while result > 1024 and suf_count < len(suffixes):
-        result /= 1024
-        suf_count += 1
-    str_result = f'{result:.{decimal_places}f} '
-    str_result += suffixes[suf_count]
-    return str_result
+def get_avail_mem():
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    return int(line.split()[1])
+    except Exception:
+        return 0
+    # Retrieves the available memory (MemAvailable) from /proc/meminfo.
 
-if __name__ == "__main__":
+def display_process_memory(program, pids, human_readable, graph_length):
+    print(f"Memory usage for program '{program}':")
+    total_mem = get_sys_mem()
+    total_rss = 0
+
+    for pid in pids:
+        rss = rss_mem_of_pid(pid)
+        total_rss += rss
+        graph = percent_to_graph(rss / total_mem, graph_length)
+        print(f"PID {pid}: {rss} KB {human_readable_format(rss) if human_readable else ''} | {graph}")
+
+    print(f"Total: {total_rss} KB {human_readable_format(total_rss) if human_readable else ''}")
+    # Displays memory usage for all processes of the specified program, with graphical representation.
+
+def display_system_memory(human_readable, graph_length):
+    total_mem = get_sys_mem()
+    avail_mem = get_avail_mem()
+    used_mem = total_mem - avail_mem
+
+    print(f"Total Memory: {total_mem} KB")
+    print(f"Available Memory: {avail_mem} KB")
+    if human_readable:
+        print(f"Total Memory: {human_readable_format(total_mem)}")
+        print(f"Available Memory: {human_readable_format(avail_mem)}")
+
+    graph = percent_to_graph(used_mem / total_mem, graph_length)
+    print(f"Used Memory: {used_mem} KB | {graph}")
+    # Displays the total, available, and used system memory with graphical representation.
+
+def main():
     args = parse_command_args()
-    if not args.program:
-        ...
+    if args.program:
+        pids = pids_of_prog(args.program)
+        if not pids:
+            print(f"No running processes found for program: {args.program}")
+        else:
+            display_process_memory(args.program, pids, args.human_readable, args.length)
     else:
-        ...
-    # process args
-    # if no parameter passed, 
-    # open meminfo.
-    # get used memory
-    # get total memory
-    # call percent to graph
-    # print
+        display_system_memory(args.human_readable, args.length)
+    # Main function to handle command-line arguments and display either program-specific or system-wide memory usage.
 
-    # if a parameter passed:
-    # get pids from pidof
-    # lookup each process id in /proc
-    # read memory used
-    # add to total used
-    # percent to graph
-    # take total our of total system memory? or total used memory? total used memory.
-    # percent to graph.
+if __name__ == '__main__':
+    main()
+    # Run the main function if the script is executed directly.
+
